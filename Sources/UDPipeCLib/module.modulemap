@@ -1,0 +1,4 @@
+module UDPipeCLib {
+    header "udpipe_wrapper.h"
+    export *
+}

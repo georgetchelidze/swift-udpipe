@@ -1,0 +1,3 @@
+[submodule "Vendors/udpipe"]
+	path = Vendors/udpipe
+	url = https://github.com/ufal/udpipe.git
