@@ -5,45 +5,13 @@ import Darwin
 import Glibc
 #endif
 
-/// A Swift wrapper for the UDPipe NLP toolkit.
-///
-/// This class provides a high-level interface for loading a UDPipe model and using it
-/// for tokenization, part-of-speech tagging, lemmatization, and dependency parsing.
-///
-/// To use it, first create an instance by loading a model file:
-/// ```
-/// let udpipe = try UDPipe(modelPath: "path/to/your/model.udpipe")
-/// ```
-///
-/// Then, you can use the instance to process text:
-/// ```
-/// let text = "Hello world. This is a test."
-///
-/// // Tokenize text into sentences (default)
-/// let sentences = udpipe.tokenize(text)
-/// for sentence in sentences {
-///     let words = sentence.tokens.map { $0.text }.joined(separator: " ")
-///     print("Sentence:", words)
-/// }
-///
-/// // Tokenize text into a flat list of words
-/// let words = udpipe.tokenize(text, by: .words)
-/// print("Words:", words.map { $0.text })
-///
-/// // Perform full tagging
-/// let taggedSentences = udpipe.tagTokens(text)
-/// for taggedSentence in taggedSentences {
-///     for token in taggedSentence {
-///         print("\(token.form) \(token.lemma) \(token.pos.rawValue)")
-///     }
-/// }
-/// ```
+/// Swift wrapper around the UDPipe NLP toolkit for tokenization, tagging, and parsing.
 public final class UDPipe {
     private let handle: udpipe_model_t
 
     /// Loads a UDPipe model from the specified file path.
     ///
-    /// - Parameter modelPath: The path to the `.udpipe` model file.
+    /// - Parameter modelPath: Path to the `.udpipe` model file.
     /// - Throws: `UDPipeError.modelLoadFailed` if the model cannot be loaded.
     public init(modelPath: String) throws {
         guard let h = udpipe_model_load(modelPath) else {
@@ -89,8 +57,7 @@ public final class UDPipe {
     /// - Returns: An array of results, where each result corresponds to an input string and contains
     ///            an array of sentences, which in turn contain an array of `TaggedToken`s.
     public func tagTokens(batch: [String], doParse: Bool = true) -> [[[TaggedToken]]] {
-        // 1. Convert Swift [String] to a C-compatible array of C-strings.
-        //    Keep owned mutable pointers for freeing, but pass as const char**.
+        // Convert Swift [String] to C-compatible strings and keep ownership for freeing.
         let ownedCStrings: [UnsafeMutablePointer<CChar>] = batch.map { s in
             if let p = strdup(s) { return p }
             return strdup("")!
@@ -98,17 +65,11 @@ public final class UDPipe {
         var constCStringPtrs: [UnsafePointer<CChar>?] = ownedCStrings.map { UnsafePointer($0) }
         defer { for ptr in ownedCStrings { free(ptr) } }
 
-        // 2. Prepare variables for the C function to write its results into.
         var outDocs: UnsafeMutablePointer<udpipe_doc_view>? = nil
         var outSize: Int = 0
 
-        // 3. Call the parallel C++ batch processing function.
-        //    Swift's C interop can bridge an array of pointers to a C-style
-        //    array of pointers for the duration of the call. We use `withUnsafeBufferPointer`
-        //    to handle the conversion from mutable to immutable pointers safely.
         let ok = constCStringPtrs.withUnsafeMutableBufferPointer { buf -> Int32 in
             guard let base = buf.baseAddress else { return 0 }
-            // Signature expects UnsafeMutablePointer<UnsafePointer<CChar>?> (const char**)
             return udpipe_tag_batch(
                 self.handle,
                 base,
@@ -119,20 +80,15 @@ public final class UDPipe {
             )
         }
 
-        // 5. Ensure the call succeeded and the output looks correct.
         guard ok == 1, let docs = outDocs, outSize == batch.count else {
-            // If the call failed but allocated some memory, try to clean up.
             if let docs = outDocs {
                 udpipe_free_batch(docs, outSize)
             }
-            // Return an empty array of arrays, maintaining the structure.
             return Array(repeating: [], count: batch.count)
         }
 
-        // 6. Ensure the results are freed after we're done converting them.
         defer { udpipe_free_batch(docs, outSize) }
 
-        // 7. Convert the C data structures back into Swift types.
         var batchResult: [[[TaggedToken]]] = []
         batchResult.reserveCapacity(outSize)
 
